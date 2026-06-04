@@ -3,22 +3,27 @@ services:
     image: spaneng/doover_device_agent:apps
     network_mode: host
 
-  sample_simulator:
-    build: ./sample
+  # Produces the lateral data stream (flow / GPS lat+lon / end-gun / pressure)
+  # and backfills ~14 h of history on startup. The lateral water-map widget
+  # reads these tags from app_key "lateral_sim".
+  lateral_simulator:
+    build: ./lateral
     network_mode: host
     restart: unless-stopped
     depends_on:
       - device_agent
     environment:
-      - APP_KEY=sim_app_key
+      - APP_KEY=lateral_sim
 
-  sample_application:
+  # The Valley lateral device app under test. It's a skeleton (no VCP yet) so it
+  # just logs; it's here so `doover app run` exercises the device-app build.
+  valley_application:
     build: ../
     network_mode: host
     restart: unless-stopped
     depends_on:
       - device_agent
-      - sample_simulator
+      - lateral_simulator
     environment:
       - APP_KEY=test_app_key
       - CONFIG_FP=/app/simulators/app_config.json

@@ -1,0 +1,39 @@
+{
+  "name": "lateral-water-map-widget",
+  "version": "0.1.0",
+  "description": "As-applied water-map remote component for the Doover lateral irrigator app — renders per-strip applied depth on a Google Map from recorded flow/GPS tag history.",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "build": "rsbuild build",
+    "watch": "rsbuild build --watch --mode development",
+    "serve": "serve -s assets/ -l 8004",
+    "test": "node --import tsx --test test/*.test.ts",
+    "sample-geojson": "tsx test/sample-geojson.ts"
+  },
+  "author": "Doover Team",
+  "license": "ISC",
+  "dependencies": {
+    "@module-federation/enhanced": "^0.21.6",
+    "@module-federation/rsbuild-plugin": "^0.21.6",
+    "@rsbuild/core": "^1.6.14",
+    "@rsbuild/plugin-react": "^1.4.2",
+    "@rspack/cli": "^1.6.7",
+    "@tanstack/react-query": "~5.90.2",
+    "dayjs": "^1.11.0",
+    "doover-js": "file:../../doover-js/doover-js-0.6.5.tgz",
+    "google-maps-react-markers": "^2.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router": "^7.7.0",
+    "recharts": "^2.15.0",
+    "serve": "^14.2.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.28",
+    "@types/react-dom": "^18.3.7",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

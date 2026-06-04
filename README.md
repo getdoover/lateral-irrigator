@@ -1,85 +1,81 @@
 
-# Doover App Template
+# Lateral Irrigator
 
 <img src="https://doover.com/wp-content/uploads/Doover-Logo-Landscape-Navy-padded-small.png" alt="App Icon" style="max-width: 300px;">
 
-**A ready template for a Doover Application**
+**Doover apps for monitoring and analysing lateral-move (linear) irrigators**
 
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/getdoover/app-template/blob/main/LICENSE)
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/getdoover/app-template?quickstart=1)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-[Getting Started](#-getting-started) • [Configuration](#configuration) • [Developer](https://github.com/getdoover/app-template/blob/main/DEVELOPMENT.md) • [Need Help?](#need-help)
+[Overview](#-overview) • [Apps](#apps) • [As-applied map](#how-the-as-applied-map-works) • [Development](DEVELOPMENT.md)
 
 <br/>
 
 ## 📖 Overview
 
-A ready-to-use template for building Doover applications. This template provides the essential
-structure and configuration needed to quickly get started with app development on the Doover
-platform, using [pydoover](https://github.com/getdoover/pydoover) 1.0.
+A monorepo of Doover apps for lateral-move irrigators, built on
+[pydoover](https://github.com/getdoover/pydoover) 1.3+. It mirrors the
+`pivot-irrigator` repo, adapted for linear travel.
 
-Use this repository as a starting point: fork it (or use the "Use this template" button),
-rename the `app_template` package, and replace the sample config, tags, UI, and state machine
-with your own.
-
-<br/>
-
-## 🚀 Getting Started
-
-### How to Use
-
-#### Quick Start Guide
-
-Click the **Open in GitHub Codespaces** badge above to launch a ready-to-go development environment with:
-- Python 3.13, uv, and all project dependencies
-- Doover CLI (`doover`) pre-installed — you'll be prompted to log in on first open
-- Claude Code with [doover-skills](https://github.com/getdoover/doover-skills) pre-configured
-
-> **Claude Code:** You'll be prompted for your `ANTHROPIC_API_KEY` when creating a Codespace.
-> Get a key at [console.anthropic.com](https://console.anthropic.com/settings/keys).
-> To skip this prompt in future, save it as a permanent secret at
-> [github.com/settings/codespaces](https://github.com/settings/codespaces).
-
-This Doover App can be managed via the Doover CLI, and installed quickly onto devices through the Doover platform.
-
-### Configuration
-
-Configuration fields are declared in [`src/app_template/app_config.py`](src/app_template/app_config.py).
-The sample schema ships with:
-
-| Setting | Description | Default |
-|---------|-------------|---------|
-| **Digital Outputs Enabled** | Toggle whether the app drives digital outputs | `true` |
-| **A Funny Message** | Free-text message used by the sample alert button | *(required)* |
-| **Simulator App Key** | App key of the simulator supplying `random_value` | *(required)* |
-
-Replace these with your own fields, then regenerate `doover_config.json` with `uv run export-config`.
+The first deliverable is the **As-Applied Water Map**: how much water the lateral
+applied across the field, derived from recorded water-flow and cart-GPS history.
+It is a *processor that hosts a remote component (widget)* — the app does no
+periodic server work; the widget reads the recorded history and computes the map
+client-side.
 
 <br/>
 
-## 🔗 Integrations
+## Apps
 
-### Tags
+| App | Package | Type | What it does |
+|-----|---------|------|--------------|
+| **Lateral As-Applied Water Map** | `src/lateral_water_map/` | Processor (Lambda) + widget | Hosts the map widget; carries the tag mappings, GPS source, path geometry, units and maps key in its config. |
+| **Valley Lateral Irrigator** | `src/valley_lateral_irrigator/` | Device app (container) | **Skeleton.** Talks to a Valley lateral panel via VCP over RS232 and publishes flow / GPS / end-gun / pressure tags. VCP transport not yet implemented. |
 
-The sample app publishes a few example tags via [`src/app_template/app_tags.py`](src/app_template/app_tags.py):
-
-| Tag | Description |
-|-----|-------------|
-| **is_working** | Heartbeat — `true` while the main loop is running |
-| **uptime** | Seconds since the app started |
-| **battery_voltage** | Example numeric value sourced from the simulator |
-| **test_output** | Echoes text entered in the UI |
+The widget source is in [`widget/`](widget/) (rspack + Module Federation →
+`widget/assets/LateralWaterMapWidget.js`). A simulator in
+[`simulators/lateral/`](simulators/lateral/) drives a GPS cart back and forth
+(backfilling history via `log_history`) so the widget can be exercised before a
+real panel exists. Test-data helpers live in [`scripts/`](scripts/).
 
 <br/>
 
-### Need Help?
+## How the as-applied map works
 
-- 📧 Email: support@doover.com
-- 📖 [Doover Documentation](https://docs.doover.com)
-- 👨‍💻 [App Developer Documentation](https://github.com/getdoover/app-template/blob/main/DEVELOPMENT.md)
+1. The widget reads the configured **flow**, **cart GPS** and optional
+   **end-gun** history. GPS can come from two lat/lon tags, a single {lat,lon}
+   tag, or the agent's `location` channel (configurable).
+2. History is segmented into **irrigation events** (new event when flow resumes
+   after a configurable dormant gap, default 5 days); a brushable flow/speed
+   timeline lets you pick any window.
+3. Each GPS sample is **projected onto the travel path** (defined by two
+   endpoints). The path is binned into **strips**; for each strip it integrates
+   `flow·time / (swath × strip_length)` to get the **applied depth (mm)**.
+   Forward and reverse passes both accumulate; the end-gun widens the swath.
+4. Each watered strip is drawn as a colour-graded **rectangle** on a Google Map.
+
+### Configuration (Lateral As-Applied Water Map)
+
+| Setting | Description |
+|---------|-------------|
+| **GPS Source** | Two tags / Single tag / Location channel |
+| **Latitude/Longitude Tag** *(two-tags)* | App + tag for each coordinate |
+| **GPS Tag** + **Lat/Lon Key** *(single)* | One tag holding {lat,lon} |
+| **Water Flow Tag** | App + tag name carrying flow |
+| **End-gun Tag** | *(optional)* boolean tag |
+| **Flow Units** | `L/s` / `L/min` / `m3/h` / `US gpm` |
+| **Path Start/End Lat/Lon** | The two ends of the travel path |
+| **Left / Right Extent (m)** | Boom swath either side of the path |
+| **End-gun Extra Extent (m)** | Added to each side when the end-gun is on |
+| **Strip Resolution (m)** | Length of each map strip along travel |
+| **Event Dormancy (days)** | Gap that starts a new event |
+| **Google Maps API Key** | Required to render; set per-deployment (not committed) |
+
+Regenerate `doover_config.json` after config/UI changes with
+`uv run export-config-watermap` / `uv run export-ui-watermap`.
 
 <br/>
 
 ## 📄 License
 
-This app is licensed under the [Apache License 2.0](https://github.com/getdoover/app-template/blob/main/LICENSE).
+Licensed under the [Apache License 2.0](LICENSE).

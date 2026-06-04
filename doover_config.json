@@ -1,59 +1,440 @@
 {
-    "sample_application": {
-        "key": "32134bbb-5278-43c0-a6ca-4046a5edeb9f",
-        "name": "sample_application",
-        "display_name": "Sample Application",
-        "type": "DEV",
-        "visibility": "PUB",
+    "lateral_water_map": {
+        "name": "lateral_water_map",
+        "display_name": "Lateral As-Applied Water Map",
+        "type": "PRO",
+        "visibility": "COR",
         "allow_many": true,
-        "description": "A template application for Doover",
+        "description": "Visualises a lateral-move irrigator's as-applied water map: reads recorded flow / cart-GPS / end-gun tag history, projects the cart onto the travel path and renders per-strip applied depth (mm) as coloured rectangles on a Google Map. All computation is client-side in the widget.",
         "long_description": "README.md",
         "depends_on": [],
         "owner_org_key": "",
-        "image_name": "ghcr.io/getdoover/app-template:main",
-        "container_registry_profile_key": "",
-        "build_args": "--platform linux/amd64,linux/arm64",
+        "handler": "src.lateral_water_map.handler",
+        "lambda_config": {
+            "Environment": {},
+            "Runtime": "python3.13",
+            "Timeout": 300,
+            "Handler": "src.lateral_water_map.handler",
+            "MemorySize": 128,
+            "Architectures": [
+                "arm64"
+            ]
+        },
+        "image_name": null,
+        "repo_branch": "main",
+        "staging_config": {},
+        "export_config_command": "export-config-watermap",
+        "export_ui_command": "export-ui-watermap",
+        "build_widget_command": "npm --prefix widget run build",
+        "widget": "widget/assets/LateralWaterMapWidget.js",
+        "run_command": null,
+        "key": null,
         "config_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "$id": "",
             "title": "$default",
             "type": "object",
             "properties": {
-                "digital_outputs_enabled": {
-                    "title": "Digital Outputs Enabled",
-                    "x-name": "digital_outputs_enabled",
+                "gps_source": {
+                    "enum": [
+                        "Two tags",
+                        "Single tag",
+                        "Location channel"
+                    ],
+                    "title": "GPS Source",
+                    "x-name": "gps_source",
                     "x-hidden": false,
                     "type": [
-                        "boolean",
+                        "string",
                         "null"
                     ],
                     "x-required": false,
-                    "default": true,
+                    "description": "Where the cart's position comes from: two numeric lat/lon tags, one tag holding {lat, lon}, or the agent's `location` channel.",
+                    "default": "Two tags",
                     "x-position": 0
                 },
-                "a_funny_message": {
-                    "title": "A Funny Message",
-                    "x-name": "a_funny_message",
+                "lat_tag": {
+                    "title": "Latitude Tag",
+                    "x-name": "lat_tag",
                     "x-hidden": false,
-                    "type": "string",
-                    "x-required": true,
-                    "x-position": 1
+                    "type": [
+                        "object",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "(Two tags mode) tag carrying the cart latitude.",
+                    "default": null,
+                    "x-position": 1,
+                    "properties": {
+                        "app_name": {
+                            "title": "Application",
+                            "x-name": "app_name",
+                            "x-hidden": false,
+                            "format": "doover-application",
+                            "type": "string",
+                            "x-required": true,
+                            "description": "App on this agent that publishes the tag.",
+                            "x-position": 1
+                        },
+                        "tag_name": {
+                            "title": "Tag Name",
+                            "x-name": "tag_name",
+                            "x-hidden": false,
+                            "type": "string",
+                            "x-required": true,
+                            "description": "Name of the tag within that app.",
+                            "x-position": 2
+                        }
+                    },
+                    "additionalElements": true,
+                    "required": [
+                        "app_name",
+                        "tag_name"
+                    ],
+                    "x-collapsible": true,
+                    "x-defaultCollapsed": false
                 },
-                "simulator_app_key": {
-                    "title": "Simulator App Key",
-                    "x-name": "simulator_app_key",
+                "lon_tag": {
+                    "title": "Longitude Tag",
+                    "x-name": "lon_tag",
                     "x-hidden": false,
-                    "format": "doover-resource-application",
-                    "type": "string",
+                    "type": [
+                        "object",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "(Two tags mode) tag carrying the cart longitude.",
+                    "default": null,
+                    "x-position": 2,
+                    "properties": {
+                        "app_name": {
+                            "title": "Application",
+                            "x-name": "app_name",
+                            "x-hidden": false,
+                            "format": "doover-application",
+                            "type": "string",
+                            "x-required": true,
+                            "description": "App on this agent that publishes the tag.",
+                            "x-position": 1
+                        },
+                        "tag_name": {
+                            "title": "Tag Name",
+                            "x-name": "tag_name",
+                            "x-hidden": false,
+                            "type": "string",
+                            "x-required": true,
+                            "description": "Name of the tag within that app.",
+                            "x-position": 2
+                        }
+                    },
+                    "additionalElements": true,
+                    "required": [
+                        "app_name",
+                        "tag_name"
+                    ],
+                    "x-collapsible": true,
+                    "x-defaultCollapsed": false
+                },
+                "gps_tag": {
+                    "title": "GPS Tag",
+                    "x-name": "gps_tag",
+                    "x-hidden": false,
+                    "type": [
+                        "object",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "(Single tag mode) tag whose value holds lat & lon.",
+                    "default": null,
+                    "x-position": 3,
+                    "properties": {
+                        "app_name": {
+                            "title": "Application",
+                            "x-name": "app_name",
+                            "x-hidden": false,
+                            "format": "doover-application",
+                            "type": "string",
+                            "x-required": true,
+                            "description": "App on this agent that publishes the tag.",
+                            "x-position": 1
+                        },
+                        "tag_name": {
+                            "title": "Tag Name",
+                            "x-name": "tag_name",
+                            "x-hidden": false,
+                            "type": "string",
+                            "x-required": true,
+                            "description": "Name of the tag within that app.",
+                            "x-position": 2
+                        }
+                    },
+                    "additionalElements": true,
+                    "required": [
+                        "app_name",
+                        "tag_name"
+                    ],
+                    "x-collapsible": true,
+                    "x-defaultCollapsed": false
+                },
+                "gps_lat_key": {
+                    "title": "GPS Lat Key",
+                    "x-name": "gps_lat_key",
+                    "x-hidden": false,
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "(Single tag / Location channel) key for latitude in the value.",
+                    "default": "lat",
+                    "x-position": 4
+                },
+                "gps_lon_key": {
+                    "title": "GPS Lon Key",
+                    "x-name": "gps_lon_key",
+                    "x-hidden": false,
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "(Single tag / Location channel) key for longitude in the value.",
+                    "default": "lon",
+                    "x-position": 5
+                },
+                "flow_tag": {
+                    "title": "Water Flow Tag",
+                    "x-name": "flow_tag",
+                    "x-hidden": false,
+                    "type": "object",
                     "x-required": true,
-                    "description": "The app key for the simulator",
-                    "x-position": 2
+                    "description": "Tag carrying the lateral's water flow rate.",
+                    "x-position": 6,
+                    "properties": {
+                        "app_name": {
+                            "title": "Application",
+                            "x-name": "app_name",
+                            "x-hidden": false,
+                            "format": "doover-application",
+                            "type": "string",
+                            "x-required": true,
+                            "description": "App on this agent that publishes the tag.",
+                            "x-position": 1
+                        },
+                        "tag_name": {
+                            "title": "Tag Name",
+                            "x-name": "tag_name",
+                            "x-hidden": false,
+                            "type": "string",
+                            "x-required": true,
+                            "description": "Name of the tag within that app.",
+                            "x-position": 2
+                        }
+                    },
+                    "additionalElements": true,
+                    "required": [
+                        "app_name",
+                        "tag_name"
+                    ],
+                    "x-collapsible": true,
+                    "x-defaultCollapsed": false
+                },
+                "end_gun_tag": {
+                    "title": "End-gun Tag",
+                    "x-name": "end_gun_tag",
+                    "x-hidden": false,
+                    "type": [
+                        "object",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Optional boolean tag indicating the end-gun is on. Leave blank if the lateral has no end-gun.",
+                    "default": null,
+                    "x-position": 7,
+                    "properties": {
+                        "app_name": {
+                            "title": "Application",
+                            "x-name": "app_name",
+                            "x-hidden": false,
+                            "format": "doover-application",
+                            "type": "string",
+                            "x-required": true,
+                            "description": "App on this agent that publishes the tag.",
+                            "x-position": 1
+                        },
+                        "tag_name": {
+                            "title": "Tag Name",
+                            "x-name": "tag_name",
+                            "x-hidden": false,
+                            "type": "string",
+                            "x-required": true,
+                            "description": "Name of the tag within that app.",
+                            "x-position": 2
+                        }
+                    },
+                    "additionalElements": true,
+                    "required": [
+                        "app_name",
+                        "tag_name"
+                    ],
+                    "x-collapsible": true,
+                    "x-defaultCollapsed": false
+                },
+                "flow_units": {
+                    "enum": [
+                        "L/s",
+                        "L/min",
+                        "m3/h",
+                        "US gpm"
+                    ],
+                    "title": "Flow Units",
+                    "x-name": "flow_units",
+                    "x-hidden": false,
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Units the flow tag is reported in.",
+                    "default": "L/s",
+                    "x-position": 8
+                },
+                "path_start_lat": {
+                    "title": "Path Start Latitude",
+                    "x-name": "path_start_lat",
+                    "x-hidden": false,
+                    "type": "number",
+                    "x-required": true,
+                    "description": "Latitude of one end of the travel path.",
+                    "x-position": 9
+                },
+                "path_start_lon": {
+                    "title": "Path Start Longitude",
+                    "x-name": "path_start_lon",
+                    "x-hidden": false,
+                    "type": "number",
+                    "x-required": true,
+                    "description": "Longitude of one end of the travel path.",
+                    "x-position": 10
+                },
+                "path_end_lat": {
+                    "title": "Path End Latitude",
+                    "x-name": "path_end_lat",
+                    "x-hidden": false,
+                    "type": "number",
+                    "x-required": true,
+                    "description": "Latitude of the other end of the travel path.",
+                    "x-position": 11
+                },
+                "path_end_lon": {
+                    "title": "Path End Longitude",
+                    "x-name": "path_end_lon",
+                    "x-hidden": false,
+                    "type": "number",
+                    "x-required": true,
+                    "description": "Longitude of the other end of the travel path.",
+                    "x-position": 12
+                },
+                "left_extent_m": {
+                    "title": "Left Extent (m)",
+                    "x-name": "left_extent_m",
+                    "x-hidden": false,
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Metres the boom waters to the LEFT of the travel direction.",
+                    "default": 50.0,
+                    "x-position": 13
+                },
+                "right_extent_m": {
+                    "title": "Right Extent (m)",
+                    "x-name": "right_extent_m",
+                    "x-hidden": false,
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Metres the boom waters to the RIGHT of the travel direction.",
+                    "default": 50.0,
+                    "x-position": 14
+                },
+                "end_gun_extra_m": {
+                    "title": "End-gun Extra Extent (m)",
+                    "x-name": "end_gun_extra_m",
+                    "x-hidden": false,
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Extra metres added to each side when the end-gun is on.",
+                    "default": 0.0,
+                    "x-position": 15
+                },
+                "strip_resolution_m": {
+                    "title": "Strip Resolution (m)",
+                    "x-name": "strip_resolution_m",
+                    "x-hidden": false,
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Length of each map strip along the travel path, in metres.",
+                    "default": 5.0,
+                    "x-position": 16
+                },
+                "dormancy_days": {
+                    "title": "Event Dormancy (days)",
+                    "x-name": "dormancy_days",
+                    "x-hidden": false,
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "A new irrigation event starts when flow resumes after at least this many days without flow.",
+                    "default": 5.0,
+                    "x-position": 17
+                },
+                "google_maps_api_key": {
+                    "title": "Google Maps API Key",
+                    "x-name": "google_maps_api_key",
+                    "x-hidden": false,
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Google Maps JavaScript API key used to render the map. Set this per-deployment \u2014 it is intentionally not committed to the repo.",
+                    "default": null,
+                    "x-position": 18
+                },
+                "dv_app_position": {
+                    "title": "Position",
+                    "x-name": "dv_app_position",
+                    "x-hidden": true,
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Position of Application in UI Structure. Smaller numbers are closer to the top.",
+                    "default": 150,
+                    "x-position": 19,
+                    "minimum": 0
                 }
             },
             "additionalElements": true,
             "required": [
-                "a_funny_message",
-                "simulator_app_key"
+                "flow_tag",
+                "path_start_lat",
+                "path_start_lon",
+                "path_end_lat",
+                "path_end_lon"
             ]
         },
         "ui_schema": {
@@ -62,137 +443,178 @@
             "position": "$config.app().dv_app_position:number:100",
             "icon": null,
             "colour": null,
-            "defaultOpen": false,
+            "defaultOpen": true,
             "type": "uiApplication",
             "name": "$config.app().APP_KEY",
             "children": {
-                "is_working": {
-                    "name": "is_working",
+                "LateralWaterMap": {
+                    "name": "LateralWaterMap",
+                    "type": "uiRemoteComponent",
+                    "displayString": "As-Applied Water Map",
+                    "showActivity": true,
+                    "componentUrl": "$config.app().dv_widget_url",
+                    "position": 51,
+                    "hidden": false,
+                    "children": {},
+                    "scope": "LateralWaterMapWidget",
+                    "module": "./LateralWaterMapWidget",
+                    "app_key": "$config.app().APP_KEY"
+                }
+            }
+        },
+        "organisation_id": null,
+        "container_registry_profile_id": null,
+        "id": 188426958713917446,
+        "owner_org_id": null,
+        "code_repo_id": null,
+        "build_args": null,
+        "icon_url": null,
+        "banner_url": null,
+        "lambda_arn": null
+    },
+    "valley_lateral_irrigator": {
+        "name": "valley_lateral_irrigator",
+        "display_name": "Valley Lateral Irrigator",
+        "type": "DEV",
+        "visibility": "PUB",
+        "allow_many": true,
+        "description": "Device app for Valley lateral-move panels (VCP over RS232). SKELETON \u2014 publishes flow / cart GPS / end-gun / pressure tags that the lateral water-map widget consumes.",
+        "long_description": "README.md",
+        "depends_on": [],
+        "owner_org_key": "",
+        "image_name": "ghcr.io/getdoover/lateral-irrigator:main",
+        "container_registry_profile_key": "",
+        "build_args": "--platform linux/amd64,linux/arm64",
+        "export_config_command": "export-config-valley",
+        "export_ui_command": "export-ui-valley",
+        "repo_branch": "main",
+        "key": null,
+        "config_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$id": "",
+            "title": "$default",
+            "type": "object",
+            "properties": {
+                "serial_port": {
+                    "title": "Serial Port",
+                    "x-name": "serial_port",
+                    "x-hidden": false,
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "RS232 serial device the Valley panel is wired to.",
+                    "default": "/dev/ttyS0",
+                    "x-position": 0
+                },
+                "baud_rate": {
+                    "title": "Baud Rate",
+                    "x-name": "baud_rate",
+                    "x-hidden": false,
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "RS232 baud rate for the VCP link.",
+                    "default": 9600,
+                    "x-position": 1
+                },
+                "poll_interval_s": {
+                    "title": "Poll Interval (s)",
+                    "x-name": "poll_interval_s",
+                    "x-hidden": false,
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "How often to poll the panel over VCP.",
+                    "default": 10.0,
+                    "x-position": 2
+                },
+                "dv_app_position": {
+                    "title": "Position",
+                    "x-name": "dv_app_position",
+                    "x-hidden": true,
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Position of Application in UI Structure. Smaller numbers are closer to the top.",
+                    "default": 100,
+                    "x-position": 3,
+                    "minimum": 0
+                }
+            },
+            "additionalElements": true,
+            "required": []
+        },
+        "ui_schema": {
+            "displayString": "$config.app().APP_DISPLAY_NAME",
+            "hidden": "$config.app().hidden:boolean:false:boolean:false",
+            "position": "$config.app().dv_app_position:number:100",
+            "icon": null,
+            "colour": null,
+            "defaultOpen": "$config.app().dv_app_default_open:boolean",
+            "type": "uiApplication",
+            "name": "$config.app().APP_KEY",
+            "children": {
+                "water_flow": {
+                    "name": "water_flow",
                     "type": "uiVariable",
-                    "displayString": "We Working?",
+                    "displayString": "Water Flow",
                     "showActivity": true,
                     "position": 51,
                     "hidden": false,
-                    "varType": "bool",
-                    "currentValue": "$tag.app().is_working:boolean:false"
+                    "varType": "float",
+                    "currentValue": "$tag.app().water_flow:number:0",
+                    "decPrecision": 1
                 },
-                "uptime": {
-                    "name": "uptime",
+                "latitude": {
+                    "name": "latitude",
                     "type": "uiVariable",
-                    "displayString": "Uptime",
+                    "displayString": "Latitude",
                     "showActivity": true,
                     "position": 52,
                     "hidden": false,
                     "varType": "float",
-                    "currentValue": "$tag.app().uptime:number:0"
+                    "currentValue": "$tag.app().latitude:number:0",
+                    "decPrecision": 6
                 },
-                "send_alert": {
-                    "name": "send_alert",
-                    "type": "uiButton",
-                    "displayString": "Send message as alert",
-                    "position": 1,
+                "longitude": {
+                    "name": "longitude",
+                    "type": "uiVariable",
+                    "displayString": "Longitude",
+                    "showActivity": true,
+                    "position": 53,
                     "hidden": false,
-                    "currentValue": "$cmds.app().send_alert",
-                    "appKey": "$config.app().APP_KEY"
+                    "varType": "float",
+                    "currentValue": "$tag.app().longitude:number:0",
+                    "decPrecision": 6
                 },
-                "test_message": {
-                    "name": "test_message",
-                    "type": "uiTextInput",
-                    "displayString": "Put in a message",
+                "system_pressure": {
+                    "name": "system_pressure",
+                    "type": "uiVariable",
+                    "displayString": "System Pressure",
+                    "showActivity": true,
                     "position": 54,
                     "hidden": false,
-                    "currentValue": "$cmds.app().test_message",
-                    "appKey": "$config.app().APP_KEY",
-                    "isTextArea": false
+                    "varType": "float",
+                    "currentValue": "$tag.app().system_pressure:number:0",
+                    "decPrecision": 1
                 },
-                "test_output": {
-                    "name": "test_output",
+                "end_gun_on": {
+                    "name": "end_gun_on",
                     "type": "uiVariable",
-                    "displayString": "This is message we got",
+                    "displayString": "End-gun On",
                     "showActivity": true,
                     "position": 55,
                     "hidden": false,
-                    "varType": "string",
-                    "currentValue": "$tag.app().test_output:string:\"\""
-                },
-                "battery": {
-                    "name": "battery",
-                    "type": "uiSubmodule",
-                    "displayString": "Battery Module",
-                    "showActivity": true,
-                    "position": 59,
-                    "hidden": false,
-                    "children": {
-                        "voltage": {
-                            "name": "voltage",
-                            "type": "uiVariable",
-                            "displayString": "Battery Voltage",
-                            "showActivity": true,
-                            "position": 56,
-                            "hidden": false,
-                            "varType": "float",
-                            "currentValue": "$tag.app().battery_voltage:number:0",
-                            "decPrecision": 2,
-                            "ranges": [
-                                {
-                                    "min": 0,
-                                    "max": 10,
-                                    "colour": "red",
-                                    "show_on_graph": true,
-                                    "label": "Low"
-                                },
-                                {
-                                    "min": 10,
-                                    "max": 20,
-                                    "colour": "green",
-                                    "show_on_graph": true,
-                                    "label": "Normal"
-                                },
-                                {
-                                    "min": 20,
-                                    "max": 30,
-                                    "colour": "blue",
-                                    "show_on_graph": true,
-                                    "label": "High"
-                                }
-                            ]
-                        },
-                        "low_voltage_alert": {
-                            "name": "low_voltage_alert",
-                            "type": "uiFloatInput",
-                            "displayString": "Low Voltage Alert",
-                            "position": 57,
-                            "hidden": false,
-                            "currentValue": "$cmds.app().low_voltage_alert",
-                            "appKey": "$config.app().APP_KEY"
-                        },
-                        "charge_mode": {
-                            "name": "charge_mode",
-                            "type": "uiSelect",
-                            "displayString": "Charge Mode",
-                            "position": 58,
-                            "hidden": false,
-                            "currentValue": "$cmds.app().charge_mode",
-                            "appKey": "$config.app().APP_KEY",
-                            "options": {
-                                "charge": {
-                                    "name": "charge",
-                                    "displayString": "Charge",
-                                    "type": "uiElement"
-                                },
-                                "discharge": {
-                                    "name": "discharge",
-                                    "displayString": "Discharge",
-                                    "type": "uiElement"
-                                },
-                                "idle": {
-                                    "name": "idle",
-                                    "displayString": "Idle",
-                                    "type": "uiElement"
-                                }
-                            }
-                        }
-                    }
+                    "varType": "bool",
+                    "currentValue": "$tag.app().end_gun_on:boolean:false"
                 }
             }
         }

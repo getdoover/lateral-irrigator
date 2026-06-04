@@ -1,33 +1,51 @@
-# Doover App Template
+# Lateral Irrigator
 
-A template for building device applications on the Doover IoT platform using pydoover 1.0.
+A monorepo of Doover apps for lateral-move (linear) irrigators, built on
+pydoover 1.3+. It mirrors `~/doover-apps/pivot-irrigator`, adapted for linear
+travel (GPS cart along a path → rectangular strips, not a rotating pivot). See
+`README.md` for the product overview.
+
+## Apps in this repo
+
+- **`src/lateral_water_map/`** — a *processor* (Lambda) that hosts the as-applied
+  water-map **widget** (`widget/`). No server-side work; all map computation is
+  client-side. Subclasses `pydoover.processor.Application`.
+- **`src/valley_lateral_irrigator/`** — a *device app* skeleton (VCP/RS232 TODO)
+  that publishes flow / GPS lat+lon / end-gun / pressure tags.
+- **`simulators/lateral/`** — drives a GPS cart back and forth, backfills via
+  `log_history`.
+- **`scripts/`** — `seed_lateral_data.py` / `clear_lateral_data.py` for pushing /
+  wiping back-dated test data on an agent (pass `--agent`/`--org`).
 
 ## Commands
 
 ```bash
-uv run pytest tests -v          # Run tests
-uv run export-config             # Write config_schema into doover_config.json
-uv run export-ui                 # Write ui_schema into doover_config.json (required to publish)
-doover app run                   # Run app + simulator locally via docker-compose
+uv run pytest tests -v             # Run tests
+uv run export-config-watermap      # Write lateral_water_map config_schema
+uv run export-ui-watermap          # Write lateral_water_map ui_schema (hosts the widget)
+uv run export-config-valley        # Write valley_lateral_irrigator config_schema
+uv run export-ui-valley            # Write valley_lateral_irrigator ui_schema
+npm --prefix widget run build      # Build the widget bundle (needs the doover-js tarball)
+npm --prefix widget test           # Widget computation unit tests
+doover app run                     # Run simulator + valley device app via docker-compose
 ```
 
 ## Project Structure
 
 ```
-src/app_template/
-  __init__.py        # Entry point — run_app(SampleApplication())
-  application.py     # Main app class (setup, main_loop, UI handlers)
-  app_config.py      # Config schema — class-level declarations
-  app_tags.py        # Runtime state tags — bound to UI elements
-  app_ui.py          # UI definition — subclasses ui.UI
-  app_state.py       # State machine using pydoover.state.StateMachine
-simulators/sample/   # Simulator app that produces test data
-tests/               # pytest suite
+src/lateral_water_map/   # Processor / UI host for the map widget
+src/valley_lateral_irrigator/  # Device app skeleton (VCP/RS232 — TODO)
+widget/                  # RemoteComponent (rspack + Module Federation, Google Maps)
+  src/LateralWaterMapWidget.tsx  # React widget
+  src/lib/lateral.ts             # Pure computation: events, GPS→path projection, strip depth, GeoJSON
+simulators/lateral/      # Simulator producing test GPS+flow data
+scripts/                 # seed/clear test-data helpers
+tests/                   # pytest suite
 ```
 
-## pydoover 1.0 Patterns
+## pydoover Patterns
 
-This app uses the pydoover 1.0 declarative API. Key patterns:
+The device app + simulator use the pydoover declarative API. Key patterns:
 
 ### Application class (application.py)
 - Set `config_cls`, `tags_cls`, `ui_cls` as class attributes — framework wires them up automatically

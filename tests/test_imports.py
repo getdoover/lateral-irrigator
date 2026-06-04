@@ -1,9 +1,4 @@
-"""Smoke tests for the template application.
-
-These validate that modules are importable, the config schema is well-formed,
-the Tags/UI classes subclass the correct bases, and the config export entry
-point runs end-to-end.
-"""
+"""Smoke tests for the lateral-irrigator apps."""
 
 import json
 
@@ -12,60 +7,83 @@ from pydoover.tags import Tags
 from pydoover.ui import UI
 
 
-def test_import_app():
-    from app_template.application import SampleApplication
-    assert SampleApplication.config_cls is not None
-    assert SampleApplication.tags_cls is not None
-    assert SampleApplication.ui_cls is not None
+# --- lateral_water_map (processor / UI host) -------------------------------
 
 
-def test_config_schema():
-    from app_template.app_config import SampleConfig
-    assert issubclass(SampleConfig, Schema)
+def test_import_watermap_app():
+    from lateral_water_map.application import LateralWaterMapApp
 
-    schema = SampleConfig.to_schema()
-    assert isinstance(schema, dict)
-    assert schema["type"] == "object"
-    assert len(schema["properties"]) > 0
-    assert "a_funny_message" in schema["required"]
-    assert "simulator_app_key" in schema["required"]
+    assert LateralWaterMapApp.config_cls is not None
+    assert LateralWaterMapApp.ui_cls is not None
 
 
-def test_tags():
-    from app_template.app_tags import SampleTags
-    assert issubclass(SampleTags, Tags)
+def test_watermap_handler_exists():
+    from lateral_water_map import handler
+
+    assert callable(handler)
 
 
-def test_ui():
-    from app_template.app_ui import SampleUI
-    assert issubclass(SampleUI, UI)
+def test_watermap_config_schema():
+    from lateral_water_map.app_config import LateralWaterMapConfig
+
+    assert issubclass(LateralWaterMapConfig, Schema)
+    schema = LateralWaterMapConfig.to_schema()
+    props = schema["properties"]
+    assert "flow_tag" in props and "app_name" in props["flow_tag"]["properties"]
+    assert "gps_source" in props
+    for key in ("path_start_lat", "path_start_lon", "path_end_lat", "path_end_lon"):
+        assert key in schema["required"]
 
 
-def test_state_machine():
-    from app_template.app_state import SampleState
-    state = SampleState()
-    assert state.state == "off"
+def test_watermap_ui_is_remote_component():
+    from lateral_water_map.app_ui import LateralWaterMapUI
+
+    assert issubclass(LateralWaterMapUI, UI)
 
 
-def test_config_export(tmp_path):
-    from app_template.app_config import SampleConfig
-
-    fp = tmp_path / "doover_config.json"
-    SampleConfig.export(fp, "sample_application")
-
-    data = json.loads(fp.read_text())
-    assert "sample_application" in data
-    assert "config_schema" in data["sample_application"]
-    assert "properties" in data["sample_application"]["config_schema"]
-
-
-def test_ui_export(tmp_path):
-    from app_template.app_ui import SampleUI
+def test_watermap_exports(tmp_path):
+    from lateral_water_map.app_config import LateralWaterMapConfig
+    from lateral_water_map.app_ui import LateralWaterMapUI
 
     fp = tmp_path / "doover_config.json"
-    SampleUI(None, None, None).export(fp, "sample_application")
+    LateralWaterMapConfig.export(fp, "lateral_water_map")
+    LateralWaterMapUI(None, None, None).export(fp, "lateral_water_map")
 
     data = json.loads(fp.read_text())
-    assert "ui_schema" in data["sample_application"]
-    assert data["sample_application"]["ui_schema"]["type"] == "uiApplication"
-    assert "is_working" in data["sample_application"]["ui_schema"]["children"]
+    entry = data["lateral_water_map"]
+    assert "properties" in entry["config_schema"]
+    assert entry["ui_schema"]["type"] == "uiApplication"
+    assert "LateralWaterMap" in entry["ui_schema"]["children"]
+
+
+# --- valley_lateral_irrigator (device skeleton) ----------------------------
+
+
+def test_import_valley_app():
+    from valley_lateral_irrigator.application import ValleyLateralIrrigatorApplication
+
+    assert ValleyLateralIrrigatorApplication.config_cls is not None
+    assert ValleyLateralIrrigatorApplication.tags_cls is not None
+    assert ValleyLateralIrrigatorApplication.ui_cls is not None
+
+
+def test_valley_tags():
+    from valley_lateral_irrigator.app_tags import ValleyLateralIrrigatorTags
+
+    assert issubclass(ValleyLateralIrrigatorTags, Tags)
+    for name in ("water_flow", "latitude", "longitude", "end_gun_on", "system_pressure"):
+        assert hasattr(ValleyLateralIrrigatorTags, name)
+
+
+def test_valley_exports(tmp_path):
+    from valley_lateral_irrigator.app_config import ValleyLateralIrrigatorConfig
+    from valley_lateral_irrigator.app_ui import ValleyLateralIrrigatorUI
+
+    fp = tmp_path / "doover_config.json"
+    ValleyLateralIrrigatorConfig.export(fp, "valley_lateral_irrigator")
+    ValleyLateralIrrigatorUI(None, None, None).export(fp, "valley_lateral_irrigator")
+
+    data = json.loads(fp.read_text())
+    entry = data["valley_lateral_irrigator"]
+    assert "properties" in entry["config_schema"]
+    assert entry["ui_schema"]["type"] == "uiApplication"

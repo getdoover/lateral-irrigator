@@ -1,5 +1,5 @@
 {
-    "digital_outputs_enabled": true,
-    "a_funny_message": "yeeha",
-    "simulator_app_key": "sim_app_key"
+    "serial_port": "/dev/ttyS0",
+    "baud_rate": 9600,
+    "poll_interval_s": 10
 }
