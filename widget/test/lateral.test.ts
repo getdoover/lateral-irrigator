@@ -109,6 +109,34 @@ test("a straight run at constant flow gives uniform depth = V/(swath*length)", (
   }
 });
 
+test("sparse GPS fixes interpolate instead of striping (held positions)", () => {
+  const cfg = baseCfg({ stripResolutionM: 5 }); // 5 m strips on the 100 m path
+  const t0 = 1_000_000_000_000;
+  // Flow logged every 2 min; a GPS fix only every 8 m (every 4 min), with the
+  // fix row sharing its timestamp with a flow row — the seeded-data shape that
+  // produced banding. Position is held between fixes by buildSamples.
+  const rows: Array<{ t: number; flow?: number; lat?: number; lon?: number }> = [];
+  const stepMs = 2 * 60_000;
+  for (let k = 0; k * 2 <= 100 / 2; k++) {
+    // 2 m/min -> 4 m per 2-min step
+    const t = t0 + k * stepMs;
+    rows.push({ t, flow: 25 });
+    const d = k * 4;
+    if (d % 8 === 0) {
+      const [lon, lat] = destinationPoint(0, 0, 90, d);
+      rows.push({ t, lat, lon });
+    }
+  }
+  const res = computeStripDepths(buildSamples(rows), cfg);
+  // every strip the cart crossed must be watered, at near-uniform depth
+  const covered = Array.from(res.depthMm.slice(0, 20));
+  const mean = covered.reduce((a, b) => a + b, 0) / covered.length;
+  for (const [s, d] of covered.entries()) {
+    assert.ok(d > 0, `strip ${s} is unwatered (striation)`);
+    assert.ok(Math.abs(d - mean) / mean < 0.35, `strip ${s}=${d} deviates from mean ${mean}`);
+  }
+});
+
 test("both travel directions accumulate (there-and-back doubles depth)", () => {
   const cfg = baseCfg();
   const t0 = 1_000_000_000_000;
