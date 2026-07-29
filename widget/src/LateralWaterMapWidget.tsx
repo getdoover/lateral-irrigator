@@ -46,6 +46,7 @@ const BRUSH_TRAVELLER = "oklch(0.208 0.042 265.755)";
 const FLOW_COLOUR = "#2c7fb8";
 const SPEED_COLOUR = "#dc2626";
 const SPEED_MAX_GAP_MIN = 60;
+const FLOW_FILL_MAX_GAP_MIN = 60;
 
 const WINDOW_OPTIONS = [2, 7, 30, 90];
 const DEFAULT_WINDOW_DAYS = 2;
@@ -484,11 +485,26 @@ function LateralWaterMapInner({ uiElement }: { uiElement?: { app_key?: string } 
       }
       prevI = i;
     }
+    // Tags are sample-and-hold, so a bucket with no messages means "unchanged",
+    // not "zero" — carry the last value forward, but only across gaps short
+    // enough to plausibly be the publish interval.
+    const fillMaxMs = FLOW_FILL_MAX_GAP_MIN * 60_000;
     const data: ChartPoint[] = [];
+    let lastFlow = 0;
+    let lastFlowT = -Infinity;
     for (let i = 0; i < n; i++) {
+      const t = Math.round(start + i * bucketMs);
+      let flow = 0;
+      if (cnt[i]) {
+        flow = sum[i] / cnt[i];
+        lastFlow = flow;
+        lastFlowT = t;
+      } else if (t - lastFlowT <= fillMaxMs) {
+        flow = lastFlow;
+      }
       data.push({
-        t: Math.round(start + i * bucketMs),
-        flow: cnt[i] ? sum[i] / cnt[i] : 0,
+        t,
+        flow,
         speed: Number.isNaN(speed[i]) ? null : speed[i],
       });
     }
