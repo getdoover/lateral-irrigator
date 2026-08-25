@@ -387,6 +387,20 @@
                     "default": 5.0,
                     "x-position": 16
                 },
+                "track_smoothing_minutes": {
+                    "title": "Track Smoothing (minutes)",
+                    "x-name": "track_smoothing_minutes",
+                    "x-hidden": false,
+                    "type": [
+                        "number",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Half-window for smoothing the cart's along-path position before computing depth. The GPS publishes on a distance threshold, so a small position error shows up as one fast strip beside one slow strip -- a stripe the machine never applied. This averages that out. Set it to the shortest genuine stop you still need to see on the map: dwells much shorter than the window get smoothed away. 0 disables.",
+                    "default": 60.0,
+                    "x-position": 17,
+                    "minimum": 0
+                },
                 "dormancy_days": {
                     "title": "Event Dormancy (days)",
                     "x-name": "dormancy_days",
@@ -398,7 +412,7 @@
                     "x-required": false,
                     "description": "A new irrigation event starts when flow resumes after at least this many days without flow.",
                     "default": 5.0,
-                    "x-position": 17
+                    "x-position": 18
                 },
                 "google_maps_api_key": {
                     "title": "Google Maps API Key",
@@ -411,7 +425,7 @@
                     "x-required": false,
                     "description": "Google Maps JavaScript API key used to render the map. Set this per-deployment \u2014 it is intentionally not committed to the repo.",
                     "default": null,
-                    "x-position": 18
+                    "x-position": 19
                 },
                 "dv_app_position": {
                     "title": "Position",
@@ -424,7 +438,7 @@
                     "x-required": false,
                     "description": "Position of Application in UI Structure. Smaller numbers are closer to the top.",
                     "default": 150,
-                    "x-position": 19,
+                    "x-position": 20,
                     "minimum": 0
                 }
             },

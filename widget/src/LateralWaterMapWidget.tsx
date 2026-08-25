@@ -26,6 +26,7 @@ import {
 import {
   buildGeoJSON,
   buildSamples,
+  buildTrack,
   computeEvents,
   computeStripDepths,
   distanceM,
@@ -74,6 +75,7 @@ interface RawConfig {
   right_extent_m?: number;
   end_gun_extra_m?: number;
   strip_resolution_m?: number;
+  track_smoothing_minutes?: number;
   dormancy_days?: number;
   google_maps_api_key?: string;
 }
@@ -135,6 +137,7 @@ function toCfg(raw: RawConfig): Cfg | null {
     rightExtentM: raw.right_extent_m ?? 50,
     endGunExtraM: raw.end_gun_extra_m ?? 0,
     stripResolutionM: raw.strip_resolution_m ?? 5,
+    trackSmoothingMinutes: raw.track_smoothing_minutes ?? 60,
     dormancyDays: raw.dormancy_days ?? 5,
     mapsApiKey: raw.google_maps_api_key ?? "",
   };
@@ -457,8 +460,6 @@ function LateralWaterMapInner({ uiElement }: { uiElement?: { app_key?: string } 
     const bucketMs = (end - start) / n;
     const sum = new Float64Array(n);
     const cnt = new Int32Array(n);
-    const latB = new Float64Array(n).fill(NaN);
-    const lonB = new Float64Array(n).fill(NaN);
     for (const s of samples) {
       const i = Math.floor((s.t - start) / bucketMs);
       if (i < 0 || i >= n) continue;
@@ -466,24 +467,51 @@ function LateralWaterMapInner({ uiElement }: { uiElement?: { app_key?: string } 
         sum[i] += s.flow;
         cnt[i] += 1;
       }
-      if (s.lat != null && s.lon != null) {
-        latB[i] = s.lat;
-        lonB[i] = s.lon;
-      }
     }
-    // Linear travel speed (m/hr) from net displacement between populated buckets.
-    const speed = new Float64Array(n).fill(NaN);
-    let prevI = -1;
-    for (let i = 0; i < n; i++) {
-      if (Number.isNaN(latB[i])) continue;
-      if (prevI >= 0) {
-        const dtMin = ((i - prevI) * bucketMs) / 60_000;
-        if (dtMin > 0 && dtMin <= SPEED_MAX_GAP_MIN) {
-          const dM = distanceM(latB[prevI], lonB[prevI], latB[i], lonB[i]);
-          speed[i] = dM / (dtMin / 60); // metres per hour
+    // Travel speed (m/hr) from the SAME smoothed along-path track the depth map
+    // uses, so the trace always explains the map.
+    //
+    // Three things were making this unreadable:
+    //  - a gap's speed was written to a single bucket, so a 10-minute average
+    //    rendered as a one-bucket needle with nulls either side (~90% of the
+    //    line was null at the 1-day window). It now spans the buckets it covers.
+    //  - dt came from bucket *indices*, so it was quantised to the bucket width
+    //    and the SPEED_MAX_GAP_MIN guard rejected every pair once a bucket grew
+    //    past 60 min -- the trace vanished entirely at the 30-day window. Both
+    //    now use real fix timestamps.
+    //  - great-circle distance is unsigned, so a backward position error read as
+    //    forward travel. The along-path projection is signed.
+    //
+    // Accumulate metres and milliseconds per bucket and divide at the end, so a
+    // bucket reports the time-weighted average speed over it. A gap wider than a
+    // bucket spreads across all the buckets it covers; several gaps inside one
+    // bucket (long windows, where a bucket is over an hour) combine instead of
+    // the last one silently overwriting the rest.
+    const distM = new Float64Array(n);
+    const timeMs = new Float64Array(n);
+    if (cfg) {
+      const track = buildTrack(samples, cfg);
+      for (let k = 0; k < track.length - 1; k++) {
+        const a = track[k];
+        const b = track[k + 1];
+        const spanMs = b.t - a.t;
+        if (spanMs <= 0 || spanMs / 60_000 > SPEED_MAX_GAP_MIN) continue;
+        const forward = Math.max(0, b.d - a.d);
+        const i0 = Math.max(0, Math.floor((a.t - start) / bucketMs));
+        const i1 = Math.min(n - 1, Math.floor((b.t - start) / bucketMs));
+        for (let i = i0; i <= i1; i++) {
+          const lo = Math.max(a.t, start + i * bucketMs);
+          const hi = Math.min(b.t, start + (i + 1) * bucketMs);
+          const overlap = hi - lo;
+          if (overlap <= 0) continue;
+          timeMs[i] += overlap;
+          distM[i] += forward * (overlap / spanMs);
         }
       }
-      prevI = i;
+    }
+    const speed = new Float64Array(n).fill(NaN);
+    for (let i = 0; i < n; i++) {
+      if (timeMs[i] > 0) speed[i] = distM[i] / (timeMs[i] / 3_600_000); // metres per hour
     }
     // Tags are sample-and-hold, so a bucket with no messages means "unchanged",
     // not "zero" — carry the last value forward, but only across gaps short
@@ -509,7 +537,7 @@ function LateralWaterMapInner({ uiElement }: { uiElement?: { app_key?: string } 
       });
     }
     return data;
-  }, [samples, windowDays]);
+  }, [samples, windowDays, cfg]);
 
   useEffect(() => {
     if (chartData.length < 2) {

@@ -10,6 +10,9 @@ import {
   buildSamples,
   computeEvents,
   computeStripDepths,
+  smoothTrack,
+  splitRuns,
+  buildTrack,
   buildGeoJSON,
   toCSV,
   downsample,
@@ -34,6 +37,7 @@ function baseCfg(overrides: Partial<LateralConfig> = {}): LateralConfig {
     rightExtentM: 50,
     endGunExtraM: 0,
     stripResolutionM: 10,
+    trackSmoothingMinutes: 0,
     dormancyDays: 5,
     mapsApiKey: "",
     ...overrides,
@@ -200,4 +204,120 @@ test("downsample keeps first & last, caps length; colour & zoom sane", () => {
   assert.equal(depthColour(5, 0), "rgb(44,127,184)");
   const z = zoomForSpan(-27.5, 400);
   assert.ok(z >= 5 && z <= 20);
+});
+
+
+// --- track smoothing --------------------------------------------------------
+
+const MIN = 60_000;
+
+test("smoothTrack is a no-op when disabled or too short to fit", () => {
+  const fx = [{ t: 0, d: 0 }, { t: MIN, d: 5 }, { t: 2 * MIN, d: 10 }];
+  assert.equal(smoothTrack(fx, 0), fx, "window 0 returns the input array itself");
+  assert.equal(smoothTrack(fx, -1), fx, "negative window returns the input array itself");
+  const two = [{ t: 0, d: 0 }, { t: MIN, d: 5 }];
+  assert.equal(smoothTrack(two, 60), two, "fewer than 3 fixes cannot be fitted");
+});
+
+test("smoothTrack suppresses a jump-then-catch-up pair", () => {
+  // steady 1 m/min creep, but fix 5 lands 4 m ahead of the truth. The raw track
+  // then shows one very fast gap followed by a stalled one -- the artefact that
+  // paints a stripe. Smoothing should pull both back toward the true rate.
+  const raw = Array.from({ length: 21 }, (_, i) => ({ t: i * MIN, d: i * 1.0 }));
+  raw[5].d += 4;
+  const speeds = (fx: { t: number; d: number }[]) =>
+    fx.slice(1).map((p, i) => (p.d - fx[i].d) / ((p.t - fx[i].t) / MIN));
+
+  const rawSpeeds = speeds(raw);
+  const smoothed = speeds(smoothTrack(raw, 8));
+  const spread = (v: number[]) => Math.max(...v) - Math.min(...v);
+
+  assert.ok(spread(rawSpeeds) > 4, `raw spread should be large, got ${spread(rawSpeeds)}`);
+  assert.ok(
+    spread(smoothed) < spread(rawSpeeds) / 4,
+    `smoothing should collapse the spread: raw ${spread(rawSpeeds).toFixed(2)} -> ${spread(smoothed).toFixed(2)}`,
+  );
+});
+
+test("smoothTrack keeps a genuine long dwell", () => {
+  // 30 min of creep, 60 min parked, 30 min of creep
+  const fx: Array<{ t: number; d: number }> = [];
+  for (let i = 0; i <= 30; i++) fx.push({ t: i * MIN, d: i });
+  for (let i = 1; i <= 60; i++) fx.push({ t: (30 + i) * MIN, d: 30 });
+  for (let i = 1; i <= 30; i++) fx.push({ t: (90 + i) * MIN, d: 30 + i });
+
+  const sm = smoothTrack(fx, 30);
+  const mid = sm.find((p) => p.t === 60 * MIN)!;
+  // the parked stretch must still read as parked, not smeared into travel
+  assert.ok(
+    Math.abs(mid.d - 30) < 6,
+    `dwell position should survive smoothing, drifted to ${mid.d.toFixed(1)} m`,
+  );
+});
+
+test("smoothTrack does not reverse within a single run", () => {
+  // small wobbles (< REVERSAL_M) are noise, not turns: one forward run
+  const fx = Array.from({ length: 20 }, (_, i) => ({
+    t: i * MIN,
+    d: i * 5 + (i % 2 ? 3 : -3),
+  }));
+  assert.equal(splitRuns(fx).length, 1, "noise must not be split into runs");
+  const sm = smoothTrack(fx, 5);
+  for (let i = 1; i < sm.length; i++) assert.ok(sm[i].d >= sm[i - 1].d, `dipped at ${i}`);
+});
+
+test("splitRuns finds each leg of a there-and-back pass", () => {
+  const fx: Array<{ t: number; d: number }> = [];
+  for (let i = 0; i <= 40; i++) fx.push({ t: i * MIN, d: i * 5 });          // out
+  for (let i = 1; i <= 40; i++) fx.push({ t: (40 + i) * MIN, d: 200 - i * 5 }); // back
+  const runs = splitRuns(fx);
+  assert.equal(runs.length, 2);
+  assert.equal(runs[0][0].d, 0);
+  assert.equal(runs[0][runs[0].length - 1].d, 200, "first leg must run to the turn");
+  assert.equal(runs[1][runs[1].length - 1].d, 0, "second leg must return to the start");
+});
+
+test("smoothing preserves a there-and-back track instead of collapsing it", () => {
+  // Regression: a global monotone clamp pinned the return leg at the turnaround,
+  // painting 7 of 21 strips at 3x depth.
+  const cfg = baseCfg({ stripResolutionM: 10, trackSmoothingMinutes: 60 });
+  const rows: Array<{ t: number; flow: number; lat: number; lon: number }> = [];
+  const at = (m: number) => {
+    const [lon, lat] = destinationPoint(0, 0, 90, m);
+    return { lat, lon };
+  };
+  for (let i = 0; i <= 40; i++) rows.push({ t: i * MIN, flow: 100, ...at(i * 2.5) });
+  for (let i = 1; i <= 40; i++) rows.push({ t: (40 + i) * MIN, flow: 100, ...at(100 - i * 2.5) });
+
+  const r = computeStripDepths(buildSamples(rows), cfg);
+  const painted = Array.from(r.depthMm).filter((d) => d > 0).length;
+  assert.equal(painted, r.nStrips, `every strip should be watered, got ${painted}/${r.nStrips}`);
+});
+
+test("smoothTrack stays linear in the number of fixes", () => {
+  const make = (n: number) => Array.from({ length: n }, (_, i) => ({ t: i * 120_000, d: i * 0.7 }));
+  const time = (n: number) => {
+    const fx = make(n);
+    const t0 = process.hrtime.bigint();
+    smoothTrack(fx, 60);
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  };
+  time(2000); // warm up
+  const small = Math.max(time(4000), 0.5);
+  const large = time(32000); // 8x the fixes
+  assert.ok(large < small * 40, `8x fixes took ${(large / small).toFixed(1)}x the time (expected ~8x, quadratic would be ~64x)`);
+});
+
+test("buildTrack projects, de-duplicates and honours the config window", () => {
+  const cfg = baseCfg({ trackSmoothingMinutes: 0 });
+  const [lon50, lat50] = destinationPoint(0, 0, 90, 50);
+  const rows = [
+    { t: 0, flow: 10, lat: 0, lon: 0 },
+    { t: MIN, flow: 10, lat: 0, lon: 0 },          // duplicate position, dropped
+    { t: 2 * MIN, flow: 10, lat: lat50, lon: lon50 },
+  ];
+  const track = buildTrack(buildSamples(rows), cfg);
+  assert.equal(track.length, 2);
+  assert.ok(Math.abs(track[0].d - 0) < 0.5);
+  assert.ok(Math.abs(track[1].d - 50) < 0.5, `expected ~50 m, got ${track[1].d}`);
 });

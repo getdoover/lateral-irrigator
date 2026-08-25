@@ -146,6 +146,19 @@ class LateralWaterMapConfig(config.Schema):
         description="Length of each map strip along the travel path, in metres.",
         name="strip_resolution_m",
     )
+    track_smoothing_minutes = config.Number(
+        "Track Smoothing (minutes)",
+        default=60.0,
+        required=False,
+        minimum=0,
+        description="Half-window for smoothing the cart's along-path position "
+        "before computing depth. The GPS publishes on a distance threshold, so "
+        "a small position error shows up as one fast strip beside one slow "
+        "strip -- a stripe the machine never applied. This averages that out. "
+        "Set it to the shortest genuine stop you still need to see on the map: "
+        "dwells much shorter than the window get smoothed away. 0 disables.",
+        name="track_smoothing_minutes",
+    )
     dormancy_days = config.Number(
         "Event Dormancy (days)",
         default=5.0,
