@@ -50,10 +50,6 @@ const SPEED_MAX_GAP_MIN = 60;
 // The analog flow meter reads ~0.09 (not 0) when idle, so an absolute epsilon
 // near zero counts sensor noise as irrigating. Gate on a fraction of the
 // window's peak flow instead, which is unit-independent.
-const CHART_FLOW_FRACTION = 0.05;
-// A pass shorter than this cannot support a speed estimate: the cart covers a
-// few metres against ~4 m of GPS error, so the ratio is meaningless.
-const MIN_PASS_MINUTES = 30;
 const FLOW_FILL_MAX_GAP_MIN = 60;
 
 const WINDOW_OPTIONS = [2, 7, 30, 90];
@@ -544,39 +540,19 @@ function LateralWaterMapInner({ uiElement }: { uiElement?: { app_key?: string } 
       }
     }
 
-    // One speed per pass, not per bucket.
+    // Per-bucket speed, straight from the filtered track.
     //
-    // A lateral holds a fixed percent-timer setting for a pass, and the measured
-    // within-pass spread bears that out (1.0-1.2x on the passes where speed is
-    // well determined). Meanwhile a single hour of a slow pass can be 80%+
-    // uncertain: the cart covers ~7 m against ~4 m of GPS error, so a per-bucket
-    // trace mostly renders that uncertainty as a slow ramp toward the true
-    // speed. Averaging over the whole pass uses the full distance and is roughly
-    // an order of magnitude better determined.
+    // How much within-pass detail is real is set by `track_responsiveness`: the
+    // Kalman filter is what decides how hard the velocity estimate is allowed to
+    // move, so that one config drives both the map and this trace. Lower it and
+    // this flattens; raise it and real stop/start comes through.
     //
-    // This deliberately hides genuine mid-pass slowdowns. Those are real, but at
-    // this fix density they are not separable from noise anyway -- denser
-    // position data (periodic publishing) is what would make them recoverable.
-    let peakFlow = 0;
-    for (let i = 0; i < n; i++) if (flowB[i] > peakFlow) peakFlow = flowB[i];
-    const flowOn = peakFlow * CHART_FLOW_FRACTION;
-
+    // Each bucket is a time-weighted average over the metres and milliseconds
+    // that actually fall inside it, so a gap wider than a bucket spreads across
+    // the buckets it covers and several gaps inside one bucket combine.
     const speed = new Float64Array(n).fill(NaN);
     for (let i = 0; i < n; i++) {
-      if (!(flowB[i] > flowOn)) continue;
-      let j = i;
-      let dist = 0;
-      let time = 0;
-      while (j < n && flowB[j] > flowOn) {
-        dist += distM[j];
-        time += timeMs[j];
-        j++;
-      }
-      if (time >= MIN_PASS_MINUTES * 60_000) {
-        const v = dist / (time / 3_600_000); // metres per hour
-        for (let k = i; k < j; k++) if (timeMs[k] > 0) speed[k] = v;
-      }
-      i = j;
+      if (timeMs[i] > 0) speed[i] = distM[i] / (timeMs[i] / 3_600_000); // metres per hour
     }
     // Tags are sample-and-hold, so a bucket with no messages means "unchanged",
     // not "zero" — carry the last value forward, but only across gaps short
