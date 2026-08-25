@@ -76,6 +76,7 @@ interface RawConfig {
   end_gun_extra_m?: number;
   strip_resolution_m?: number;
   track_smoothing_minutes?: number;
+  reversal_threshold_m?: number;
   dormancy_days?: number;
   google_maps_api_key?: string;
 }
@@ -138,6 +139,7 @@ function toCfg(raw: RawConfig): Cfg | null {
     endGunExtraM: raw.end_gun_extra_m ?? 0,
     stripResolutionM: raw.strip_resolution_m ?? 5,
     trackSmoothingMinutes: raw.track_smoothing_minutes ?? 60,
+    reversalThresholdM: raw.reversal_threshold_m ?? 20,
     dormancyDays: raw.dormancy_days ?? 5,
     mapsApiKey: raw.google_maps_api_key ?? "",
   };

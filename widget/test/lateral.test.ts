@@ -12,6 +12,7 @@ import {
   computeStripDepths,
   smoothTrack,
   splitRuns,
+  DEFAULT_REVERSAL_M,
   buildTrack,
   buildGeoJSON,
   toCSV,
@@ -38,6 +39,7 @@ function baseCfg(overrides: Partial<LateralConfig> = {}): LateralConfig {
     endGunExtraM: 0,
     stripResolutionM: 10,
     trackSmoothingMinutes: 0,
+    reversalThresholdM: 20,
     dormancyDays: 5,
     mapsApiKey: "",
     ...overrides,
@@ -320,4 +322,46 @@ test("buildTrack projects, de-duplicates and honours the config window", () => {
   assert.equal(track.length, 2);
   assert.ok(Math.abs(track[0].d - 0) < 0.5);
   assert.ok(Math.abs(track[1].d - 50) < 0.5, `expected ~50 m, got ${track[1].d}`);
+});
+
+
+test("the reversal threshold decides what counts as a turn", () => {
+  // a 12 m doubling-back: noise at the 20 m default, a real turn at 5 m
+  const fx: Array<{ t: number; d: number }> = [];
+  for (let i = 0; i <= 30; i++) fx.push({ t: i * MIN, d: i * 2 });        // out to 60 m
+  for (let i = 1; i <= 6; i++) fx.push({ t: (30 + i) * MIN, d: 60 - i * 2 }); // back 12 m
+
+  assert.equal(splitRuns(fx, 20).length, 1, "12 m is below a 20 m threshold: one run");
+  assert.equal(splitRuns(fx, 5).length, 2, "12 m clears a 5 m threshold: two runs");
+});
+
+test("a non-positive or junk reversal threshold falls back to the default", () => {
+  const fx: Array<{ t: number; d: number }> = [];
+  for (let i = 0; i <= 30; i++) fx.push({ t: i * MIN, d: i * 2 });
+  for (let i = 1; i <= 20; i++) fx.push({ t: (30 + i) * MIN, d: 60 - i * 2 });
+
+  const ref = splitRuns(fx, DEFAULT_REVERSAL_M).length;
+  for (const bad of [0, -5, NaN, undefined as unknown as number]) {
+    assert.equal(splitRuns(fx, bad).length, ref, `threshold ${bad} should use the default`);
+  }
+});
+
+test("buildTrack honours the configured reversal threshold", () => {
+  const rows: Array<{ t: number; flow: number; lat: number; lon: number }> = [];
+  const at = (m: number) => {
+    const [lon, lat] = destinationPoint(0, 0, 90, m);
+    return { lat, lon };
+  };
+  for (let i = 0; i <= 20; i++) rows.push({ t: i * MIN, flow: 100, ...at(i * 2) });
+  for (let i = 1; i <= 6; i++) rows.push({ t: (20 + i) * MIN, flow: 100, ...at(40 - i * 2) });
+  const samples = buildSamples(rows);
+
+  // smoothing on, so the run split actually shows up in the output
+  const coarse = buildTrack(samples, baseCfg({ trackSmoothingMinutes: 30, reversalThresholdM: 20 }));
+  const fine = buildTrack(samples, baseCfg({ trackSmoothingMinutes: 30, reversalThresholdM: 5 }));
+
+  // with a 5 m threshold the return leg is its own run and keeps its retreat;
+  // at 20 m it is folded into one forward run and gets flattened out
+  const retreat = (t: { d: number }[]) => t[t.length - 1].d - Math.max(...t.map((p) => p.d));
+  assert.ok(retreat(fine) < retreat(coarse) - 1, `fine=${retreat(fine).toFixed(1)} coarse=${retreat(coarse).toFixed(1)}`);
 });

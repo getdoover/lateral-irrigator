@@ -21,6 +21,8 @@ export interface LateralConfig {
   stripResolutionM: number;
   /** Half-window in minutes for smoothing the along-path track. 0 = off. */
   trackSmoothingMinutes: number;
+  /** How far the cart must double back before it counts as a new pass, in metres. */
+  reversalThresholdM: number;
   dormancyDays: number;
   mapsApiKey: string;
 }
@@ -197,10 +199,17 @@ export interface TrackFix {
   d: number; // metres along the path
 }
 
-/** A reversal has to exceed plausible GPS error before we treat it as a turn.
- * Field fixes here report ~4 m accuracy; 20 m is comfortably clear of that and
- * far shorter than any real pass. */
-const REVERSAL_M = 20;
+/** Default reversal threshold. A turn has to exceed plausible GPS error before
+ * we believe it: field fixes report ~4 m accuracy, so 20 m is comfortably clear
+ * of that while staying far shorter than any real pass. Short fields, or machines
+ * that legitimately shuttle over short distances, want this lowered. */
+export const DEFAULT_REVERSAL_M = 20;
+
+/** Guard the configured value: 0 or nonsense would make every GPS wobble a
+ * turn, shattering the track into unsmoothable fragments. */
+function reversalMetres(value: number | undefined): number {
+  return Number.isFinite(value) && (value as number) > 0 ? (value as number) : DEFAULT_REVERSAL_M;
+}
 
 /** Split a track into monotonic runs.
  *
@@ -209,10 +218,11 @@ const REVERSAL_M = 20;
  * own -- fitting a line through a turnaround averages the outward and return
  * legs into roughly zero slope, which collapses a whole pass onto one point.
  *
- * A run ends where the cart retreats REVERSAL_M past that run's extreme, and the
+ * A run ends where the cart retreats `reversalM` past that run's extreme, and the
  * next run starts at the extreme itself, so no travel is dropped or duplicated.
  */
-export function splitRuns(fixes: TrackFix[]): TrackFix[][] {
+export function splitRuns(fixes: TrackFix[], reversalM: number = DEFAULT_REVERSAL_M): TrackFix[][] {
+  const minTurn = reversalMetres(reversalM);
   if (fixes.length < 2) return fixes.length ? [fixes.slice()] : [];
   const runs: TrackFix[][] = [];
   let startIdx = 0;
@@ -222,7 +232,7 @@ export function splitRuns(fixes: TrackFix[]): TrackFix[][] {
   for (let i = 1; i < fixes.length; i++) {
     const d = fixes[i].d;
     if (dir === 0) {
-      if (Math.abs(d - fixes[startIdx].d) >= REVERSAL_M) dir = Math.sign(d - fixes[startIdx].d);
+      if (Math.abs(d - fixes[startIdx].d) >= minTurn) dir = Math.sign(d - fixes[startIdx].d);
       if (dir === 0 || (dir > 0 ? d > fixes[extremeIdx].d : d < fixes[extremeIdx].d)) extremeIdx = i;
       continue;
     }
@@ -232,7 +242,7 @@ export function splitRuns(fixes: TrackFix[]): TrackFix[][] {
       continue;
     }
     const retreat = dir > 0 ? fixes[extremeIdx].d - d : d - fixes[extremeIdx].d;
-    if (retreat >= REVERSAL_M) {
+    if (retreat >= minTurn) {
       runs.push(fixes.slice(startIdx, extremeIdx + 1));
       startIdx = extremeIdx; // the turn belongs to both legs
       extremeIdx = i;
@@ -312,10 +322,14 @@ function smoothRun(run: TrackFix[], halfWinMin: number): TrackFix[] {
  * `halfWinMin` sets the shortest dwell that survives. A genuine stop lasting
  * roughly the window or longer is preserved; anything briefer is averaged away.
  */
-export function smoothTrack(fixes: TrackFix[], halfWinMin: number): TrackFix[] {
+export function smoothTrack(
+  fixes: TrackFix[],
+  halfWinMin: number,
+  reversalM: number = DEFAULT_REVERSAL_M,
+): TrackFix[] {
   if (halfWinMin <= 0 || fixes.length < 3) return fixes;
   const out: TrackFix[] = [];
-  for (const run of splitRuns(fixes)) {
+  for (const run of splitRuns(fixes, reversalM)) {
     const sm = smoothRun(run, halfWinMin);
     // the turn fix is shared between adjacent runs; keep it once
     for (const p of sm) {
@@ -352,7 +366,11 @@ export function buildTrack(samples: Sample[], cfg: LateralConfig): TrackFix[] {
     }
     fixes.push({ t: s.t, d: along(s.lat, s.lon), lat: s.lat, lon: s.lon });
   }
-  return smoothTrack(fixes.map(({ t, d }) => ({ t, d })), cfg.trackSmoothingMinutes ?? 0);
+  return smoothTrack(
+    fixes.map(({ t, d }) => ({ t, d })),
+    cfg.trackSmoothingMinutes ?? 0,
+    cfg.reversalThresholdM,
+  );
 }
 
 // --- depth ------------------------------------------------------------------

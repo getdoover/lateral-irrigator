@@ -159,6 +159,19 @@ class LateralWaterMapConfig(config.Schema):
         "dwells much shorter than the window get smoothed away. 0 disables.",
         name="track_smoothing_minutes",
     )
+    reversal_threshold_m = config.Number(
+        "Direction Reversal Threshold (m)",
+        default=20.0,
+        required=False,
+        minimum=0,
+        description="How far the cart must double back before it counts as a "
+        "new pass rather than GPS wobble. Each pass is smoothed on its own, so "
+        "this must sit above the GPS error (fixes typically report ~4 m) and "
+        "below the shortest real pass. Lower it for a short field or a machine "
+        "that shuttles over short distances; too low and noise shatters the "
+        "track into fragments that barely get smoothed. 0 uses the 20 m default.",
+        name="reversal_threshold_m",
+    )
     dormancy_days = config.Number(
         "Event Dormancy (days)",
         default=5.0,
