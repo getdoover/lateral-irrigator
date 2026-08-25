@@ -387,17 +387,17 @@
                     "default": 5.0,
                     "x-position": 16
                 },
-                "track_smoothing_minutes": {
-                    "title": "Track Smoothing (minutes)",
-                    "x-name": "track_smoothing_minutes",
+                "track_responsiveness": {
+                    "title": "Track Responsiveness",
+                    "x-name": "track_responsiveness",
                     "x-hidden": false,
                     "type": [
                         "number",
                         "null"
                     ],
                     "x-required": false,
-                    "description": "Half-window for smoothing the cart's along-path position before computing depth. The GPS publishes on a distance threshold, so a small position error shows up as one fast strip beside one slow strip -- a stripe the machine never applied. This averages that out. Set it to the shortest genuine stop you still need to see on the map: dwells much shorter than the window get smoothed away. 0 disables.",
-                    "default": 60.0,
+                    "description": "How readily the travel-speed estimate follows the GPS. The GPS publishes on a distance threshold, so a small position error shows up as one fast strip beside one slow strip -- a stripe the machine never applied. A Kalman filter over the track removes that. Lower is smoother; higher follows real stop/start more closely.\n\nLowering it past the default buys very little map smoothness and costs a lot of real detail. Measured on a real 14 h pass, against a 30 min stop the machine actually made:\n  0.01    map varies 39%, stop 80% visible, speed reads 96% of true\n  0.003   map varies 31%, stop 67% visible, speed reads 94% of true\n  0.001   map varies 26%, stop 55% visible, speed reads 92% of true (default)\n  0.0001  map varies 23%, stop 35% visible, speed reads 85% of true\n  0.00001 map varies 18%, stop 23% visible, speed reads 81% of true\n\nNote the speed column: the filter under-reports travel speed more and more as this is lowered, so the speed chart drifts away from the truth at the same time the map stops showing real stops. Below about 0.000001 it fits one near-constant speed across the parked gaps between passes, which looks smooth but reports roughly half the true speed. Raise it if real stop/start behaviour matters more than a smooth map. 0 disables filtering entirely.",
+                    "default": 0.001,
                     "x-position": 17,
                     "minimum": 0
                 },

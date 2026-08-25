@@ -47,6 +47,13 @@ const BRUSH_TRAVELLER = "oklch(0.208 0.042 265.755)";
 const FLOW_COLOUR = "#2c7fb8";
 const SPEED_COLOUR = "#dc2626";
 const SPEED_MAX_GAP_MIN = 60;
+// The analog flow meter reads ~0.09 (not 0) when idle, so an absolute epsilon
+// near zero counts sensor noise as irrigating. Gate on a fraction of the
+// window's peak flow instead, which is unit-independent.
+const CHART_FLOW_FRACTION = 0.05;
+// A pass shorter than this cannot support a speed estimate: the cart covers a
+// few metres against ~4 m of GPS error, so the ratio is meaningless.
+const MIN_PASS_MINUTES = 30;
 const FLOW_FILL_MAX_GAP_MIN = 60;
 
 const WINDOW_OPTIONS = [2, 7, 30, 90];
@@ -75,7 +82,7 @@ interface RawConfig {
   right_extent_m?: number;
   end_gun_extra_m?: number;
   strip_resolution_m?: number;
-  track_smoothing_minutes?: number;
+  track_responsiveness?: number;
   reversal_threshold_m?: number;
   dormancy_days?: number;
   google_maps_api_key?: string;
@@ -138,7 +145,7 @@ function toCfg(raw: RawConfig): Cfg | null {
     rightExtentM: raw.right_extent_m ?? 50,
     endGunExtraM: raw.end_gun_extra_m ?? 0,
     stripResolutionM: raw.strip_resolution_m ?? 5,
-    trackSmoothingMinutes: raw.track_smoothing_minutes ?? 60,
+    trackResponsiveness: raw.track_responsiveness ?? 0.001,
     reversalThresholdM: raw.reversal_threshold_m ?? 20,
     dormancyDays: raw.dormancy_days ?? 5,
     mapsApiKey: raw.google_maps_api_key ?? "",
@@ -498,7 +505,15 @@ function LateralWaterMapInner({ uiElement }: { uiElement?: { app_key?: string } 
         const b = track[k + 1];
         const spanMs = b.t - a.t;
         if (spanMs <= 0 || spanMs / 60_000 > SPEED_MAX_GAP_MIN) continue;
-        const forward = Math.max(0, b.d - a.d);
+        // Speed comes from the filter's own velocity state where available.
+        // Differencing the track is what forced position to be over-smoothed
+        // before, which turned real stop/start into ramps.
+        // Magnitude, not signed velocity: a lateral waters on the return pass
+        // too, and clamping backwards travel to zero drew those passes as a flat
+        // zero line -- hiding real travel and adding apparent variability.
+        const vAvg = a.v != null && b.v != null ? (a.v + b.v) / 2 : null;
+        const forward =
+          vAvg != null ? Math.abs(vAvg) * (spanMs / 60_000) : Math.abs(b.d - a.d);
         const i0 = Math.max(0, Math.floor((a.t - start) / bucketMs));
         const i1 = Math.min(n - 1, Math.floor((b.t - start) / bucketMs));
         for (let i = i0; i <= i1; i++) {
@@ -511,30 +526,66 @@ function LateralWaterMapInner({ uiElement }: { uiElement?: { app_key?: string } 
         }
       }
     }
+    // Flow per bucket, sample-and-hold across short gaps.
+    const fillMaxMs = FLOW_FILL_MAX_GAP_MIN * 60_000;
+    const flowB = new Float64Array(n);
+    {
+      let lastFlow = 0;
+      let lastFlowT = -Infinity;
+      for (let i = 0; i < n; i++) {
+        const t = start + i * bucketMs;
+        if (cnt[i]) {
+          flowB[i] = sum[i] / cnt[i];
+          lastFlow = flowB[i];
+          lastFlowT = t;
+        } else if (t - lastFlowT <= fillMaxMs) {
+          flowB[i] = lastFlow;
+        }
+      }
+    }
+
+    // One speed per pass, not per bucket.
+    //
+    // A lateral holds a fixed percent-timer setting for a pass, and the measured
+    // within-pass spread bears that out (1.0-1.2x on the passes where speed is
+    // well determined). Meanwhile a single hour of a slow pass can be 80%+
+    // uncertain: the cart covers ~7 m against ~4 m of GPS error, so a per-bucket
+    // trace mostly renders that uncertainty as a slow ramp toward the true
+    // speed. Averaging over the whole pass uses the full distance and is roughly
+    // an order of magnitude better determined.
+    //
+    // This deliberately hides genuine mid-pass slowdowns. Those are real, but at
+    // this fix density they are not separable from noise anyway -- denser
+    // position data (periodic publishing) is what would make them recoverable.
+    let peakFlow = 0;
+    for (let i = 0; i < n; i++) if (flowB[i] > peakFlow) peakFlow = flowB[i];
+    const flowOn = peakFlow * CHART_FLOW_FRACTION;
+
     const speed = new Float64Array(n).fill(NaN);
     for (let i = 0; i < n; i++) {
-      if (timeMs[i] > 0) speed[i] = distM[i] / (timeMs[i] / 3_600_000); // metres per hour
+      if (!(flowB[i] > flowOn)) continue;
+      let j = i;
+      let dist = 0;
+      let time = 0;
+      while (j < n && flowB[j] > flowOn) {
+        dist += distM[j];
+        time += timeMs[j];
+        j++;
+      }
+      if (time >= MIN_PASS_MINUTES * 60_000) {
+        const v = dist / (time / 3_600_000); // metres per hour
+        for (let k = i; k < j; k++) if (timeMs[k] > 0) speed[k] = v;
+      }
+      i = j;
     }
     // Tags are sample-and-hold, so a bucket with no messages means "unchanged",
     // not "zero" — carry the last value forward, but only across gaps short
     // enough to plausibly be the publish interval.
-    const fillMaxMs = FLOW_FILL_MAX_GAP_MIN * 60_000;
     const data: ChartPoint[] = [];
-    let lastFlow = 0;
-    let lastFlowT = -Infinity;
     for (let i = 0; i < n; i++) {
-      const t = Math.round(start + i * bucketMs);
-      let flow = 0;
-      if (cnt[i]) {
-        flow = sum[i] / cnt[i];
-        lastFlow = flow;
-        lastFlowT = t;
-      } else if (t - lastFlowT <= fillMaxMs) {
-        flow = lastFlow;
-      }
       data.push({
-        t,
-        flow,
+        t: Math.round(start + i * bucketMs),
+        flow: flowB[i],
         speed: Number.isNaN(speed[i]) ? null : speed[i],
       });
     }

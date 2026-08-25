@@ -38,7 +38,7 @@ function baseCfg(overrides: Partial<LateralConfig> = {}): LateralConfig {
     rightExtentM: 50,
     endGunExtraM: 0,
     stripResolutionM: 10,
-    trackSmoothingMinutes: 0,
+    trackResponsiveness: 0,
     reversalThresholdM: 20,
     dormancyDays: 5,
     mapsApiKey: "",
@@ -215,10 +215,10 @@ const MIN = 60_000;
 
 test("smoothTrack is a no-op when disabled or too short to fit", () => {
   const fx = [{ t: 0, d: 0 }, { t: MIN, d: 5 }, { t: 2 * MIN, d: 10 }];
-  assert.equal(smoothTrack(fx, 0), fx, "window 0 returns the input array itself");
-  assert.equal(smoothTrack(fx, -1), fx, "negative window returns the input array itself");
+  assert.equal(smoothTrack(fx, 0), fx, "responsiveness 0 returns the input array itself");
+  assert.equal(smoothTrack(fx, -1), fx, "negative responsiveness returns the input array itself");
   const two = [{ t: 0, d: 0 }, { t: MIN, d: 5 }];
-  assert.equal(smoothTrack(two, 60), two, "fewer than 3 fixes cannot be fitted");
+  assert.equal(smoothTrack(two, 0.001), two, "fewer than 3 fixes cannot be filtered");
 });
 
 test("smoothTrack suppresses a jump-then-catch-up pair", () => {
@@ -231,7 +231,7 @@ test("smoothTrack suppresses a jump-then-catch-up pair", () => {
     fx.slice(1).map((p, i) => (p.d - fx[i].d) / ((p.t - fx[i].t) / MIN));
 
   const rawSpeeds = speeds(raw);
-  const smoothed = speeds(smoothTrack(raw, 8));
+  const smoothed = speeds(smoothTrack(raw, 0.001));
   const spread = (v: number[]) => Math.max(...v) - Math.min(...v);
 
   assert.ok(spread(rawSpeeds) > 4, `raw spread should be large, got ${spread(rawSpeeds)}`);
@@ -248,7 +248,7 @@ test("smoothTrack keeps a genuine long dwell", () => {
   for (let i = 1; i <= 60; i++) fx.push({ t: (30 + i) * MIN, d: 30 });
   for (let i = 1; i <= 30; i++) fx.push({ t: (90 + i) * MIN, d: 30 + i });
 
-  const sm = smoothTrack(fx, 30);
+  const sm = smoothTrack(fx, 0.001);
   const mid = sm.find((p) => p.t === 60 * MIN)!;
   // the parked stretch must still read as parked, not smeared into travel
   assert.ok(
@@ -264,7 +264,7 @@ test("smoothTrack does not reverse within a single run", () => {
     d: i * 5 + (i % 2 ? 3 : -3),
   }));
   assert.equal(splitRuns(fx).length, 1, "noise must not be split into runs");
-  const sm = smoothTrack(fx, 5);
+  const sm = smoothTrack(fx, 0.001);
   for (let i = 1; i < sm.length; i++) assert.ok(sm[i].d >= sm[i - 1].d, `dipped at ${i}`);
 });
 
@@ -282,7 +282,7 @@ test("splitRuns finds each leg of a there-and-back pass", () => {
 test("smoothing preserves a there-and-back track instead of collapsing it", () => {
   // Regression: a global monotone clamp pinned the return leg at the turnaround,
   // painting 7 of 21 strips at 3x depth.
-  const cfg = baseCfg({ stripResolutionM: 10, trackSmoothingMinutes: 60 });
+  const cfg = baseCfg({ stripResolutionM: 10, trackResponsiveness: 0.001 });
   const rows: Array<{ t: number; flow: number; lat: number; lon: number }> = [];
   const at = (m: number) => {
     const [lon, lat] = destinationPoint(0, 0, 90, m);
@@ -301,7 +301,7 @@ test("smoothTrack stays linear in the number of fixes", () => {
   const time = (n: number) => {
     const fx = make(n);
     const t0 = process.hrtime.bigint();
-    smoothTrack(fx, 60);
+    smoothTrack(fx, 0.001);
     return Number(process.hrtime.bigint() - t0) / 1e6;
   };
   time(2000); // warm up
@@ -311,7 +311,7 @@ test("smoothTrack stays linear in the number of fixes", () => {
 });
 
 test("buildTrack projects, de-duplicates and honours the config window", () => {
-  const cfg = baseCfg({ trackSmoothingMinutes: 0 });
+  const cfg = baseCfg({ trackResponsiveness: 0 });
   const [lon50, lat50] = destinationPoint(0, 0, 90, 50);
   const rows = [
     { t: 0, flow: 10, lat: 0, lon: 0 },
@@ -356,12 +356,33 @@ test("buildTrack honours the configured reversal threshold", () => {
   for (let i = 1; i <= 6; i++) rows.push({ t: (20 + i) * MIN, flow: 100, ...at(40 - i * 2) });
   const samples = buildSamples(rows);
 
-  // smoothing on, so the run split actually shows up in the output
-  const coarse = buildTrack(samples, baseCfg({ trackSmoothingMinutes: 30, reversalThresholdM: 20 }));
-  const fine = buildTrack(samples, baseCfg({ trackSmoothingMinutes: 30, reversalThresholdM: 5 }));
+  // A 12 m doubling-back: one run at the 20 m default, two runs at 5 m. Split
+  // into two runs the filter tracks the reversal, so the tail velocity is
+  // negative; folded into one forward run it is not.
+  const coarse = buildTrack(samples, baseCfg({ trackResponsiveness: 0.001, reversalThresholdM: 20 }));
+  const fine = buildTrack(samples, baseCfg({ trackResponsiveness: 0.001, reversalThresholdM: 5 }));
 
-  // with a 5 m threshold the return leg is its own run and keeps its retreat;
-  // at 20 m it is folded into one forward run and gets flattened out
-  const retreat = (t: { d: number }[]) => t[t.length - 1].d - Math.max(...t.map((p) => p.d));
-  assert.ok(retreat(fine) < retreat(coarse) - 1, `fine=${retreat(fine).toFixed(1)} coarse=${retreat(coarse).toFixed(1)}`);
+  assert.ok(fine[fine.length - 1].v! < 0, `expected the return leg to read as negative, got ${fine[fine.length - 1].v}`);
+  assert.ok(coarse[coarse.length - 1].v! > fine[fine.length - 1].v!, "a coarser threshold must not see the turn");
+});
+
+test("the filter reports a velocity for every fix", () => {
+  const fx = Array.from({ length: 30 }, (_, i) => ({ t: i * MIN, d: i * 0.35 }));
+  const sm = smoothTrack(fx, 0.001);
+  assert.equal(sm.length, fx.length);
+  for (const p of sm) assert.ok(Number.isFinite(p.v), "velocity must be populated");
+  const mid = sm[15].v!;
+  assert.ok(Math.abs(mid - 0.35) < 0.1, `steady creep should read ~0.35 m/min, got ${mid.toFixed(3)}`);
+});
+
+test("the filter has no start-up ramp", () => {
+  // regression: seeding v=0 under a tight prior made the filter believe the
+  // machine was parked, ramping up over the first several fixes
+  const fx = Array.from({ length: 30 }, (_, i) => ({ t: i * MIN, d: i * 0.35 }));
+  const sm = smoothTrack(fx, 0.001);
+  assert.ok(
+    Math.abs(sm[0].v! - 0.35) < 0.1,
+    `first fix should already read cruise speed, got ${sm[0].v!.toFixed(3)}`,
+  );
+  assert.ok(Math.abs(sm[0].d - 0) < 1, `first fix position should not be offset, got ${sm[0].d.toFixed(2)}`);
 });
