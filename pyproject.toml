@@ -5,7 +5,7 @@ description = "Doover apps for monitoring and analysing lateral-move irrigators:
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "pydoover>=1.3.1",
+    "pydoover>=1.5.0",
     "transitions>=0.9.2",
 ]
 
